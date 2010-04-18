@@ -5,6 +5,10 @@ This is setup as a submodule:
 
   $ git submodule add git@github.com:0xfe/vex.git
 
+After pushing changes here, go up to the superproject, and:
+
+  $ git submodule update
+
 Global setup:
 
  Download and install Git
