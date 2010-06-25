@@ -1,6 +1,11 @@
 /**
  * VexTab Parser Tests
  * Copyright Mohit Cheppudira 2010 <mohit@muthanna.com>
+ *
+ * These tests simply check if parsing different types of strings
+ * succeed or fail. They don't verify if the correct elements are
+ * created. That part will be added after I factor the element generation
+ * out of the parser.
  */
 
 if (!Vex.Flow.Test) Vex.Flow.Test = {};
@@ -17,6 +22,7 @@ Vex.Flow.Test.VexTab.Start = function() {
   test("Vibrato Test", Vex.Flow.Test.VexTab.vibrato);
   test("Chord Test", Vex.Flow.Test.VexTab.chord);
   test("Tapping Test", Vex.Flow.Test.VexTab.tapping);
+  test("Chord Ties Test", Vex.Flow.Test.VexTab.chordTies);
 }
 
 Vex.Flow.Test.VexTab.catchError = function(tab, code) {
@@ -155,6 +161,32 @@ Vex.Flow.Test.VexTab.tapping = function() {
 
   Vex.Flow.Test.VexTab.catchError(tab, "notes 5t/4");
   Vex.Flow.Test.VexTab.catchError(tab, "notes t-4-4h5/3");
+
+  ok(true, "all pass");
+}
+
+Vex.Flow.Test.VexTab.chordTies = function() {
+  var tab = new Vex.Flow.VexTab();
+
+  tab.parse("notes (1/2.2/3)s(3/2.4/3)");
+  ok(true, "Simple chord slide.");
+
+  tab.parse("notes (1/2.2/3.3/4)s(3/2.4/3.5/4)");
+  ok(true, "Four note chord slide.");
+
+  tab.parse("notes (4/5.1/2.2/3)s(3/2.4/3)");
+  ok(true, "Mixed note count chord slide.");
+
+  tab.parse("notes (1/2.2/3)s(3/2.5/5.4/3)");
+  ok(true, "Reverse note count chord slide.");
+
+  tab.parse("notes (1/2.2/3)s(3/2.4/3)h(6/2.7/3)");
+  ok(true, "Slide then hammer");
+
+  tab.parse("notes t(1/2.2/3)s(3/2.4/3)h(6/2.7/3)");
+  ok(true, "Tap a chord, then slide and hammer");
+
+  Vex.Flow.Test.VexTab.catchError(tab, "notes (1/2.2/3)s3/3");
 
   ok(true, "all pass");
 }

@@ -1,5 +1,4 @@
 /**
- * @preserve
  * VexTab Parser - A recursive descent parser for the VexTab language.
  * Copyright Mohit Cheppudira 2010 <mohit@muthanna.com>
  *
@@ -285,6 +284,7 @@ Vex.Flow.VexTab.prototype.parseToken = function(str) {
     bends: [],                // Bends associated with positions
     vibratos: [],             // Vibrations associated with positions
     ties: [],                 // Ties associated with positions
+    chord_ties: [],           // Chord ties associated with positions
 
     inside_bend: false,       // Are we inside a bend
     chord_index: -1           // The current chord index
@@ -334,7 +334,10 @@ Vex.Flow.VexTab.prototype.parseTapAnnotation = function() {
 
   // The next token must be a fret.
   this.getNextToken();
-  this.parseFret();
+  switch (this.parse_state.value) {
+    case "(": this.parseOpenChord(); break;
+    default: this.parseFret();
+  }
 }
 
 
@@ -397,6 +400,10 @@ Vex.Flow.VexTab.prototype.parseCloseChord = function() {
   // vibrato.
   this.getNextToken();
   switch (this.parse_state.value) {
+    case "h": this.parseChordTie(); break;
+    case "p": this.parseChordTie(); break;
+    case "s": this.parseChordTie(); break;
+    case "t": this.parseChordTie(); break;
     case "v": this.parseVibrato(); break;
     case "V": this.parseVibrato(); break;
     default: this.parseError("Unexpected token: " + this.parse_state.value);
@@ -570,6 +577,23 @@ Vex.Flow.VexTab.prototype.parseTie = function() {
   this.parseFret();
 }
 
+/**
+ * Parse ties, hammerons, slides, etc. in chords.
+ * @private
+ */
+Vex.Flow.VexTab.prototype.parseChordTie = function() {
+  this.parse_state.chord_ties.push({
+    position: this.parse_state.position_index,
+    effect: this.parse_state.value.toUpperCase()
+  });
+
+  // Next token has to be a fret number.
+  this.getNextToken();
+  if (this.parse_state.value != "(")
+    this.parseError("Expecting ( after chord ties/slides");
+  this.parseOpenChord();
+}
+
 
 /**
  * Parse bends outside a chord context.
@@ -625,7 +649,10 @@ Vex.Flow.VexTab.prototype.genElements = function() {
       to_fret = bends[i].to_fret;
     } else {
       to_fret = parseInt(positions[bend.position + 1][bend.index].fret);
-      notes[bend.position + 1].persist = false;
+
+      for (var count = 1; count <= bend.count; ++count) {
+        notes[bend.position + count].persist = false;
+      }
     }
 
     var release = false;
@@ -644,8 +671,15 @@ Vex.Flow.VexTab.prototype.genElements = function() {
       case 4: bent_note.addModifier(
                   new Vex.Flow.Bend("2 Steps", release), bend.index); break;
       default: bent_note.addModifier(
-                  new Vex.Flow.Bend("Bend to" + to_fret, release), bend.index);
+                  new Vex.Flow.Bend("Bend to " + to_fret, release), bend.index);
     }
+  }
+
+  function persistentPosition(pos) {
+    for (var i = pos; i >= 0; --i) {
+      if (notes[i].persist == true) return i;
+    }
+    throw new Vex.RERR("GenError", "Invalid position: " + pos);
   }
 
   // Add vibratos
@@ -669,16 +703,17 @@ Vex.Flow.VexTab.prototype.genElements = function() {
   for (var i = 0; i < ties.length; ++i) {
     var tie = ties[i];
     var effect;
+    var pos = persistentPosition(tie.position);
 
     if (tie.effect == "S") {
       // Slides are a special case.
       effect = new Vex.Flow.TabSlide({
-        first_note: notes[tie.position].note,
+        first_note: notes[pos].note,
         last_note: notes[tie.position + 1].note
       });
     } else {
       effect = new Vex.Flow.TabTie({
-        first_note: notes[tie.position].note,
+        first_note: notes[pos].note,
         last_note: notes[tie.position + 1].note
       }, tie.effect);
     }
@@ -686,7 +721,63 @@ Vex.Flow.VexTab.prototype.genElements = function() {
     this.elements.ties[this.state.current_stave].push(effect);
   }
 
-  // Push notes, skipping non-persistant notes.
+  // Add chord ties
+  var chord_ties = this.parse_state.chord_ties;
+  for (var i = 0; i < chord_ties.length; ++i) {
+    var tie = chord_ties[i];
+    var effect;
+    var pos = persistentPosition(tie.position);
+
+    // Organize indices by string number.
+    var indices = [];
+    for (var p = 0; p < positions[pos].length; ++p) {
+      var position = positions[pos][p];
+      indices[position.str] = {from: p};
+    }
+    for (var p = 0; p < positions[tie.position + 1].length; ++p) {
+      var position = positions[tie.position + 1][p];
+      if (!indices[position.str]) indices[position.str] = {};
+      indices[position.str].to = p;
+    }
+
+    // Build indices for the ties.
+    var first_indices = [];
+    var last_indices = [];
+
+    for (var j = 0; j < indices.length; ++j) {
+      var index = indices[j];
+      if (!index) continue;
+
+      // Ensure that we only have tie notes that have both
+      // and from and to fret.
+      if (typeof(index.from) == "undefined" ||
+          typeof(index.to) == "undefined") continue;
+
+      first_indices.push(index.from);
+      last_indices.push(index.to);
+    }
+
+    if (tie.effect == "S") {
+      // Slides are a special case.
+      effect = new Vex.Flow.TabSlide({
+        first_note: notes[pos].note,
+        last_note: notes[tie.position + 1].note,
+        first_indices: first_indices,
+        last_indices: last_indices
+      });
+    } else {
+      effect = new Vex.Flow.TabTie({
+        first_note: notes[pos].note,
+        last_note: notes[tie.position + 1].note,
+        first_indices: first_indices,
+        last_indices: last_indices
+      }, tie.effect);
+    }
+
+    this.elements.ties[this.state.current_stave].push(effect);
+  }
+
+  // Push notes, skipping non-persistent notes.
   for (var i = 0; i < notes.length; ++i) {
     var note = notes[i];
     if (note.persist)
